@@ -26,13 +26,15 @@ import (
 
 // Server is the main Machinery object and stores all configuration
 // All the tasks workers process are registered against the server
+
+//Machinery的业务主体
 type Server struct {
-	config            *config.Config
+	config            *config.Config //关联配置
 	registeredTasks   *sync.Map
-	broker            brokersiface.Broker
-	backend           backendsiface.Backend
-	lock              lockiface.Lock
-	scheduler         *cron.Cron
+	broker            brokersiface.Broker   //关联通用broker
+	backend           backendsiface.Backend //关联通用backend
+	lock              lockiface.Lock        //关联通用的lock（本地锁/redis锁）
+	scheduler         *cron.Cron            //包含一个内存的cron
 	prePublishHandler func(*tasks.Signature)
 }
 
@@ -137,6 +139,7 @@ func (server *Server) SetPreTaskHandler(handler func(*tasks.Signature)) {
 }
 
 // RegisterTasks registers all tasks at once
+// 注册任务：这个方法比较有趣，把任务编排所需要的所有操作方法都注册到Sever结构中的registeredTasks，在需要使用的时候Sever会在里面查找
 func (server *Server) RegisterTasks(namedTaskFuncs map[string]interface{}) error {
 	for _, task := range namedTaskFuncs {
 		if err := tasks.ValidateTask(task); err != nil {
@@ -169,6 +172,7 @@ func (server *Server) IsTaskRegistered(name string) bool {
 }
 
 // GetRegisteredTask returns registered task by name
+// 根据名字获取已经注册的执行函数
 func (server *Server) GetRegisteredTask(name string) (interface{}, error) {
 	taskFunc, ok := server.registeredTasks.Load(name)
 	if !ok {

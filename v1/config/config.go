@@ -56,7 +56,7 @@ type Config struct {
 	Broker                  string           `yaml:"broker" envconfig:"BROKER"`
 	Lock                    string           `yaml:"lock" envconfig:"LOCK"`
 	MultipleBrokerSeparator string           `yaml:"multiple_broker_separator" envconfig:"MULTIPLE_BROKEN_SEPARATOR"`
-	DefaultQueue            string           `yaml:"default_queue" envconfig:"DEFAULT_QUEUE"`
+	DefaultQueue            string           `yaml:"default_queue" envconfig:"DEFAULT_QUEUE"` //作用，实现machinery的扩展性
 	ResultBackend           string           `yaml:"result_backend" envconfig:"RESULT_BACKEND"`
 	ResultsExpireIn         int              `yaml:"results_expire_in" envconfig:"RESULTS_EXPIRE_IN"`
 	AMQP                    *AMQPConfig      `yaml:"amqp"`
@@ -141,6 +141,7 @@ type RedisConfig struct {
 	// NormalTasksPollPeriod specifies the period in milliseconds when polling redis for normal tasks
 	// Default: 1000
 	NormalTasksPollPeriod int `yaml:"normal_tasks_poll_period" envconfig:"REDIS_NORMAL_TASKS_POLL_PERIOD"`
+	//NormalTasksPollPeriod：worker在执行函数时是执行的BLPOP命令这个参数就决定了没有任务触发时阻塞多久
 
 	// DelayedTasksPollPeriod specifies the period in milliseconds when polling redis for delayed tasks
 	// Default: 20
