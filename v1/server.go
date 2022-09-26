@@ -84,6 +84,7 @@ func NewServer(cnf *config.Config) (*Server, error) {
 }
 
 // NewWorker creates Worker instance
+//	Sever 建立 Worker
 func (server *Server) NewWorker(consumerTag string, concurrency int) *Worker {
 	return &Worker{
 		server:      server,
@@ -94,6 +95,7 @@ func (server *Server) NewWorker(consumerTag string, concurrency int) *Worker {
 }
 
 // NewCustomQueueWorker creates Worker instance with Custom Queue
+// Sever 建立 Worker的第二种方法：NewCustomQueueWorker，与NewWorker的最大区别，就是queue可以指定，避免所有的任务都注册到系统默认的队列中去
 func (server *Server) NewCustomQueueWorker(consumerTag string, concurrency int, queue string) *Worker {
 	return &Worker{
 		server:      server,
@@ -242,6 +244,8 @@ func (server *Server) SendChain(chain *tasks.Chain) (*result.ChainAsyncResult, e
 }
 
 // SendGroupWithContext will inject the trace context in all the signature headers before publishing it
+
+// 向Worker发送group分组任务（sendConcurrency为发送并发压制）
 func (server *Server) SendGroupWithContext(ctx context.Context, group *tasks.Group, sendConcurrency int) ([]*result.AsyncResult, error) {
 	span, _ := opentracing.StartSpanFromContext(ctx, "SendGroup", tracing.ProducerOption(), tracing.MachineryTag, tracing.WorkflowGroupTag)
 	defer span.Finish()
@@ -263,6 +267,7 @@ func (server *Server) SendGroupWithContext(ctx context.Context, group *tasks.Gro
 	server.backend.InitGroup(group.GroupUUID, group.GetUUIDs())
 
 	// Init the tasks Pending state first
+	// 初始化组中的任务初始状态
 	for _, signature := range group.Tasks {
 		if err := server.backend.SetStatePending(signature); err != nil {
 			errorsChan <- err
@@ -283,6 +288,7 @@ func (server *Server) SendGroupWithContext(ctx context.Context, group *tasks.Gro
 			<-pool
 		}
 
+		//并发的把group数据publish到server
 		go func(s *tasks.Signature, index int) {
 			defer wg.Done()
 
@@ -299,6 +305,7 @@ func (server *Server) SendGroupWithContext(ctx context.Context, group *tasks.Gro
 				return
 			}
 
+			//结果存储
 			asyncResults[index] = result.NewAsyncResult(s, server.backend)
 		}(signature, i)
 	}
@@ -309,6 +316,7 @@ func (server *Server) SendGroupWithContext(ctx context.Context, group *tasks.Gro
 		done <- 1
 	}()
 
+	//等待获取结果
 	select {
 	case err := <-errorsChan:
 		return asyncResults, err

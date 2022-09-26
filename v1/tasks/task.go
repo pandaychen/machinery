@@ -19,11 +19,13 @@ var ErrTaskPanicked = errors.New("Invoking task caused a panic")
 
 // Task wraps a signature and methods used to reflect task arguments and
 // return values after invoking the task
+
+// Task：任务（signature）+执行方法+上下文+任务执行参数的封装！
 type Task struct {
-	TaskFunc   reflect.Value
+	TaskFunc   reflect.Value //TaskFunc：是注册在Server中的执行函数的反射值Value
 	UseContext bool
 	Context    context.Context
-	Args       []reflect.Value
+	Args       []reflect.Value //Args 是对signature中的Args进行处理的到切片中每个value的反射值，较为通用
 }
 
 type signatureCtxType struct{}
@@ -46,6 +48,11 @@ func SignatureFromContext(ctx context.Context) *Signature {
 }
 
 // NewWithSignature is the same as New but injects the signature
+
+//新建Task，方法一：
+//在worker中的process方法中，通过从broker中获取的signature原始任务信息以及从server中获取的任务执行方法taskFunc，建立了一个Task结构，并使用task.call() 进行了函数执行
+
+//此外，UseContext 参数就是看第一个函数入参是否为context类型，个人感觉这个直接传context更容易理解一些
 func NewWithSignature(taskFunc interface{}, signature *Signature) (*Task, error) {
 	args := signature.Args
 	ctx := context.Background()
@@ -63,6 +70,7 @@ func NewWithSignature(taskFunc interface{}, signature *Signature) (*Task, error)
 		}
 	}
 
+	//建立Task后使用 task.ReflectArgs()方法来进行参数列表的值反射
 	if err := task.ReflectArgs(args); err != nil {
 		return nil, fmt.Errorf("Reflect task args error: %s", err)
 	}
@@ -72,6 +80,7 @@ func NewWithSignature(taskFunc interface{}, signature *Signature) (*Task, error)
 
 // New tries to use reflection to convert the function and arguments
 // into a reflect.Value and prepare it for invocation
+// 新建task：方法二
 func New(taskFunc interface{}, args []Arg) (*Task, error) {
 	task := &Task{
 		TaskFunc: reflect.ValueOf(taskFunc),
@@ -185,6 +194,7 @@ func (t *Task) Call() (taskResults []*TaskResult, err error) {
 }
 
 // ReflectArgs converts []TaskArg to []reflect.Value
+// 对Args 进行通用化处理，ReflectValue根据Arg结构的类型来新建一个类型相同的储值空间并将Arg结构的值拷贝进去
 func (t *Task) ReflectArgs(args []Arg) error {
 	argValues := make([]reflect.Value, len(args))
 

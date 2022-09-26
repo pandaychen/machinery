@@ -26,12 +26,19 @@ const defaultRedisDelayedTasksKey = "delayed_tasks"
 
 // Broker represents a Redis broker
 type Broker struct {
-	common.Broker
+	common.Broker //
 	common.RedisConnector
-	host         string
-	password     string
-	db           int
-	pool         *redis.Pool
+	host     string
+	password string
+	db       int
+	pool     *redis.Pool
+
+	/*三个独立的sync.WaitGroup
+	1、worker启动的独立消费者
+	2、并发执行任务的执行者
+	3、执行延时任务的执行者
+
+	*/
 	consumingWG  sync.WaitGroup // wait group to make sure whole consumption completes
 	processingWG sync.WaitGroup // use wait group to make sure task processing completes
 	delayedWG    sync.WaitGroup
@@ -60,11 +67,13 @@ func New(cnf *config.Config, host, password, socketPath string, db int) iface.Br
 }
 
 // StartConsuming enters a loop and waits for incoming messages
+// 在loop中不停的处理任务
 func (b *Broker) StartConsuming(consumerTag string, concurrency int, taskProcessor iface.TaskProcessor) (bool, error) {
 	b.consumingWG.Add(1)
 	defer b.consumingWG.Done()
 
 	if concurrency < 1 {
+		//设置并发度
 		concurrency = runtime.NumCPU() * 2
 	}
 
@@ -94,6 +103,7 @@ func (b *Broker) StartConsuming(consumerTag string, concurrency int, taskProcess
 
 	// initialize worker pool with maxWorkers workers
 	for i := 0; i < concurrency; i++ {
+		//初始化并发控制的buffered channel
 		pool <- struct{}{}
 	}
 
@@ -108,9 +118,11 @@ func (b *Broker) StartConsuming(consumerTag string, concurrency int, taskProcess
 			select {
 			// A way to stop this goroutine from b.StopConsuming
 			case <-b.GetStopChan():
+				//在deliveries，分发前的逻辑，监听到GetStopChan被触发，这时关闭deliveries这个channel，会触发consume(deliveries <-chan []byte, concurrency int, taskProcessor iface.TaskProcessor)这个方法的退出，consume检测到deliveries这个channel被关闭时，主动退出
 				close(deliveries)
 				return
 			case <-pool:
+				//等待获取令牌后执行
 				select {
 				case <-b.GetStopChan():
 					close(deliveries)
@@ -119,9 +131,11 @@ func (b *Broker) StartConsuming(consumerTag string, concurrency int, taskProcess
 				}
 
 				if taskProcessor.PreConsumeHandler() {
+					//获取broker中存储的任务
 					task, _ := b.nextTask(getQueue(b.GetConfig(), taskProcessor))
 					//TODO: should this error be ignored?
 					if len(task) > 0 {
+						//分发到deliveries channel
 						deliveries <- task
 					}
 				}
@@ -143,11 +157,13 @@ func (b *Broker) StartConsuming(consumerTag string, concurrency int, taskProcess
 			case <-b.GetStopChan():
 				return
 			default:
+				//从Redis的sortedSet获取到期的延时任务，然后推送到普通任务队列中去
 				task, err := b.nextDelayedTask(b.redisDelayedTasksKey)
 				if err != nil {
 					continue
 				}
 
+				//反序列化redis中的数据
 				signature := new(tasks.Signature)
 				decoder := json.NewDecoder(bytes.NewReader(task))
 				decoder.UseNumber()
@@ -155,6 +171,7 @@ func (b *Broker) StartConsuming(consumerTag string, concurrency int, taskProcess
 					log.ERROR.Print(errs.NewErrCouldNotUnmarshalTaskSignature(task, err))
 				}
 
+				//推送到普通任务队列中去
 				if err := b.Publish(context.Background(), signature); err != nil {
 					log.ERROR.Print(err)
 				}
@@ -273,8 +290,8 @@ func (b *Broker) GetDelayedTasks() ([]*tasks.Signature, error) {
 	return taskSignatures, nil
 }
 
-// consume takes delivered messages from the channel and manages a worker pool
-// to process tasks concurrently
+// consume takes delivered messages from the channel and manages a worker pool to process tasks concurrently
+// 任务消费逻辑（并发）：并发的控制采用了buffered channel信号量式的控制方式
 func (b *Broker) consume(deliveries <-chan []byte, concurrency int, taskProcessor iface.TaskProcessor) error {
 	errorsChan := make(chan error, concurrency*2)
 	pool := make(chan struct{}, concurrency)
@@ -282,6 +299,7 @@ func (b *Broker) consume(deliveries <-chan []byte, concurrency int, taskProcesso
 	// init pool for Worker tasks execution, as many slots as Worker concurrency param
 	go func() {
 		for i := 0; i < concurrency; i++ {
+			//采用和deliveries相同的方式控制并发
 			pool <- struct{}{}
 		}
 	}()
@@ -292,15 +310,19 @@ func (b *Broker) consume(deliveries <-chan []byte, concurrency int, taskProcesso
 			return err
 		case d, open := <-deliveries:
 			if !open {
+				//退出，在StartConsuming的逻辑中，会关闭deliveries
 				return nil
 			}
 			if concurrency > 0 {
 				// get execution slot from pool (blocks until one is available)
 				select {
 				case <-b.GetStopChan():
+					//如果收到了stopConsumer的指令，那么这里把当前未被处理的任务归还到broker（通过RPUSH到redis）
+					//在StopConsuming中会触发此逻辑
 					b.requeueMessage(d, taskProcessor)
 					continue
 				case <-pool:
+					//拿到令牌，退出select，继续执行
 				}
 			}
 
@@ -309,6 +331,8 @@ func (b *Broker) consume(deliveries <-chan []byte, concurrency int, taskProcesso
 			// Consume the task inside a goroutine so multiple tasks
 			// can be processed concurrently
 			go func() {
+				// 并发的异步执行一个task
+				//consumeOne
 				if err := b.consumeOne(d, taskProcessor); err != nil {
 					errorsChan <- err
 				}
@@ -317,6 +341,7 @@ func (b *Broker) consume(deliveries <-chan []byte, concurrency int, taskProcesso
 
 				if concurrency > 0 {
 					// give slot back to pool
+					// 如果是异步方式，则在任务结束之后，归还令牌！
 					pool <- struct{}{}
 				}
 			}()
@@ -325,6 +350,7 @@ func (b *Broker) consume(deliveries <-chan []byte, concurrency int, taskProcesso
 }
 
 // consumeOne processes a single message using TaskProcessor
+// consumeOne：真正处理一个任务
 func (b *Broker) consumeOne(delivery []byte, taskProcessor iface.TaskProcessor) error {
 	signature := new(tasks.Signature)
 	decoder := json.NewDecoder(bytes.NewReader(delivery))
@@ -346,6 +372,7 @@ func (b *Broker) consumeOne(delivery []byte, taskProcessor iface.TaskProcessor) 
 
 	log.DEBUG.Printf("Received new message: %s", delivery)
 
+	//最终是调用worker的Process方法，来处理单个原子任务！
 	return taskProcessor.Process(signature)
 }
 

@@ -1,5 +1,7 @@
 package tasks
 
+//任务编排（多个任务）
+
 import (
 	"fmt"
 
@@ -12,16 +14,19 @@ type Chain struct {
 }
 
 // Group creates a set of tasks to be executed in parallel
+// 分组任务的定义
 type Group struct {
-	GroupUUID string
-	Tasks     []*Signature
+	GroupUUID string       //组ID
+	Tasks     []*Signature //多个signature
 }
 
 // Chord adds an optional callback to the group to be executed
 // after all tasks in the group finished
+
+// Chord任务是在Group任务的基础上加入了一个Callback单任务，其编排的目的就是在所有Group的任务做成功后，进行一个回调函数
 type Chord struct {
 	Group    *Group
-	Callback *Signature
+	Callback *Signature //
 }
 
 // GetUUIDs returns slice of task UUIDS
@@ -56,6 +61,7 @@ func NewChain(signatures ...*Signature) (*Chain, error) {
 }
 
 // NewGroup creates a new group of tasks to be processed in parallel
+// 创建group任务
 func NewGroup(signatures ...*Signature) (*Group, error) {
 	// Generate a group UUID
 	groupUUID := uuid.New().String()

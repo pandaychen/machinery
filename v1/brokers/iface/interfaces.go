@@ -7,11 +7,15 @@ import (
 	"github.com/RichardKnop/machinery/v1/tasks"
 )
 
-// Broker - a common interface for all brokers
+// Broker - a common interface for all brokers、
+
+//broker的通用结构，定义了如何存取任务队列
 type Broker interface {
 	GetConfig() *config.Config
 	SetRegisteredTaskNames(names []string)
 	IsTaskRegistered(name string) bool
+
+	//worker中启动StartConsuming进行任务拉取
 	StartConsuming(consumerTag string, concurrency int, p TaskProcessor) (bool, error)
 	StopConsuming()
 	Publish(ctx context.Context, task *tasks.Signature) error

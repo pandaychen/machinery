@@ -5,6 +5,7 @@ import (
 )
 
 // Backend - a common interface for all result backends
+// Backend 用于记录执行任务状态和结果
 type Backend interface {
 	// Group related functions
 	InitGroup(groupUUID string, taskUUIDs []string) error

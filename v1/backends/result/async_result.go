@@ -17,6 +17,8 @@ var (
 )
 
 // AsyncResult represents a task result
+
+// AsyncResult封装了backend、taskState以及task本身的属性
 type AsyncResult struct {
 	Signature *tasks.Signature
 	taskState *tasks.TaskState

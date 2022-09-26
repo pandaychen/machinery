@@ -1,5 +1,7 @@
 package machinery
 
+//machinery的worker实现
+
 import (
 	"errors"
 	"fmt"
@@ -11,7 +13,7 @@ import (
 	"time"
 
 	"github.com/opentracing/opentracing-go"
-	
+
 	"github.com/RichardKnop/machinery/v1/backends/amqp"
 	"github.com/RichardKnop/machinery/v1/brokers/errs"
 	"github.com/RichardKnop/machinery/v1/log"
@@ -22,14 +24,14 @@ import (
 
 // Worker represents a single worker process
 type Worker struct {
-	server            *Server
+	server            *Server //worker可以调用Server的各种实现方法（server中记录了各种执行任务的方法和数据获取接口-broker，结构处理接口backend等等）
 	ConsumerTag       string
-	Concurrency       int
-	Queue             string
-	errorHandler      func(err error)
-	preTaskHandler    func(*tasks.Signature)
-	postTaskHandler   func(*tasks.Signature)
-	preConsumeHandler func(*Worker) bool
+	Concurrency       int                    //启动一个 worker 执行任务的并发量最大值，默认为当前cpu核数2倍
+	Queue             string                 //任务触发队列存储 Key，用于worker处理不同队列的消息（类似topic）
+	errorHandler      func(err error)        //errorHandler比较重要
+	preTaskHandler    func(*tasks.Signature) //执行任务前做的处理函数，详见worker.Process
+	postTaskHandler   func(*tasks.Signature) //执行任务后做的处理函数，详见worker.Process
+	preConsumeHandler func(*Worker) bool     //消费任务前的判断任务是否可消费逻辑，详见broker.ConsumeOne
 }
 
 var (
@@ -41,9 +43,12 @@ var (
 
 // Launch starts a new worker process. The worker subscribes
 // to the default queue and processes incoming registered tasks
+
+// 启动worker，返回一个异步的阻塞error channel
 func (worker *Worker) Launch() error {
 	errorsChan := make(chan error)
 
+	//启动一个异步执行的worker，Loop执行任务
 	worker.LaunchAsync(errorsChan)
 
 	return <-errorsChan
@@ -51,6 +56,8 @@ func (worker *Worker) Launch() error {
 
 // LaunchAsync is a non blocking version of Launch
 func (worker *Worker) LaunchAsync(errorsChan chan<- error) {
+
+	//调用server的方法，获取配置及broker等基础信息
 	cnf := worker.server.GetConfig()
 	broker := worker.server.GetBroker()
 
@@ -73,12 +80,18 @@ func (worker *Worker) LaunchAsync(errorsChan chan<- error) {
 
 	var signalWG sync.WaitGroup
 	// Goroutine to start broker consumption and handle retries when broker connection dies
+
+	//worker中会开一个独立goroutine维护一个broker消费者，用errchan阻塞住，维护消费者的同时监听一个系统的信号管道做优雅退出，
 	go func() {
 		for {
+			//StartConsuming：任务处理
+
+			//这里特别注意第三个参数：worker，以iface.TaskProcessor类型的参数传入，最终在执行任务的时候被调用（worker.Process方法）
 			retry, err := broker.StartConsuming(worker.ConsumerTag, worker.Concurrency, worker)
 
 			if retry {
 				if worker.errorHandler != nil {
+					//如果用户定义了errorHandler
 					worker.errorHandler(err)
 				} else {
 					log.WARNING.Printf("Broker failed with error: %s", err)
@@ -130,6 +143,8 @@ func (worker *Worker) Quit() {
 }
 
 // Process handles received tasks and triggers success/error callbacks
+
+// 任务会被PROCESS处理，参数为signature *tasks.Signature
 func (worker *Worker) Process(signature *tasks.Signature) error {
 	// If the task is not registered with this worker, do not continue
 	// but only return nil as we do not want to restart the worker process
@@ -137,6 +152,7 @@ func (worker *Worker) Process(signature *tasks.Signature) error {
 		return nil
 	}
 
+	//查询对应signature.Name的注册处理方法
 	taskFunc, err := worker.server.GetRegisteredTask(signature.Name)
 	if err != nil {
 		return nil
@@ -148,6 +164,8 @@ func (worker *Worker) Process(signature *tasks.Signature) error {
 	}
 
 	// Prepare task for processing
+
+	//！！根据taskFunc，以及原始任务signature，构造一个新的task结构
 	task, err := tasks.NewWithSignature(taskFunc, signature)
 	// if this failed, it means the task is malformed, probably has invalid
 	// signature, go directly to task failed without checking whether to retry
@@ -170,19 +188,26 @@ func (worker *Worker) Process(signature *tasks.Signature) error {
 
 	//Run handler before the task is called
 	if worker.preTaskHandler != nil {
+		//处理任务前，hook
 		worker.preTaskHandler(signature)
 	}
 
 	//Defer run handler for the end of the task
 	if worker.postTaskHandler != nil {
+		//处理任务后，hook，通过defer
 		defer worker.postTaskHandler(signature)
 	}
 
 	// Call the task
+	//处理任务
 	results, err := task.Call()
+
+	//处理完成，根据处理任务的结果和报错调用taskfailed和taskSucceeded，使用backend接口进行记录
 	if err != nil {
 		// If a tasks.ErrRetryTaskLater was returned from the task,
 		// retry the task after specified duration
+
+		//对任务重试的处理机制
 		retriableErr, ok := interface{}(err).(tasks.ErrRetryTaskLater)
 		if ok {
 			return worker.retryTaskIn(signature, retriableErr.RetryIn())
@@ -197,6 +222,7 @@ func (worker *Worker) Process(signature *tasks.Signature) error {
 		return worker.taskFailed(signature, err)
 	}
 
+	//记录处理成功
 	return worker.taskSucceeded(signature, results)
 }
 

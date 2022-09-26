@@ -130,6 +130,8 @@ func (b *Broker) GetRegisteredTaskNames() []string {
 // If the routing key is an empty string:
 // a) set it to binding key for direct exchange type
 // b) set it to default queue name
+
+// 如果signature没有指定分发的队列名字，那么就使用默认的
 func (b *Broker) AdjustRoutingKey(s *tasks.Signature) {
 	if s.RoutingKey != "" {
 		return

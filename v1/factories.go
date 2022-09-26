@@ -34,6 +34,8 @@ import (
 
 // BrokerFactory creates a new object of iface.Broker
 // Currently only AMQP/S broker is supported
+
+// 根据配置文件创建broker
 func BrokerFactory(cnf *config.Config) (brokeriface.Broker, error) {
 	if strings.HasPrefix(cnf.Broker, "amqp://") {
 		return amqpbroker.New(cnf), nil

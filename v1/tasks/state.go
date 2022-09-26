@@ -18,6 +18,8 @@ const (
 )
 
 // TaskState represents a state of a task
+
+// TaskState：任务执行的状态机
 type TaskState struct {
 	TaskUUID  string        `bson:"_id"`
 	TaskName  string        `bson:"task_name"`

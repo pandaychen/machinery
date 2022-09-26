@@ -1,5 +1,7 @@
 package redis
 
+//Redis的Backend结构实现
+
 import (
 	"bytes"
 	"encoding/json"
