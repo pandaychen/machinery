@@ -1,5 +1,7 @@
 package redis
 
+//redis锁的LockWithRetries实现，可以参考应用于现网项目
+
 import (
 	"errors"
 	"strconv"

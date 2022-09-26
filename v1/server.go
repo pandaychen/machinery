@@ -50,6 +50,7 @@ func NewServerWithBrokerBackendLock(cnf *config.Config, brokerServer brokersifac
 	}
 
 	// Run scheduler job
+	//https://github.com/robfig/cron/blob/master/cron.go#L226
 	go srv.scheduler.Run()
 
 	return srv
@@ -366,6 +367,9 @@ func (server *Server) GetRegisteredTaskNames() []string {
 }
 
 // RegisterPeriodicTask register a periodic task which will be triggered periodically
+
+// 封装的cron的注册方法：向cron注册定时调度事件
+//注意，仅仅注册在内存，重启会丢失？
 func (server *Server) RegisterPeriodicTask(spec, name string, signature *tasks.Signature) error {
 	//check spec
 	schedule, err := cron.ParseStandard(spec)
@@ -375,6 +379,9 @@ func (server *Server) RegisterPeriodicTask(spec, name string, signature *tasks.S
 
 	f := func() {
 		//get lock
+		// 锁的实现，可以参考下
+		// LockWithRetries的参数1：排他ID
+		//LockWithRetries的参数2：是什么意思？
 		err := server.lock.LockWithRetries(utils.GetLockName(name, spec), schedule.Next(time.Now()).UnixNano()-1)
 		if err != nil {
 			return
@@ -387,6 +394,7 @@ func (server *Server) RegisterPeriodicTask(spec, name string, signature *tasks.S
 		}
 	}
 
+	//注册cron，以及到期触发的事件处理方法f
 	_, err = server.scheduler.AddFunc(spec, f)
 	return err
 }
